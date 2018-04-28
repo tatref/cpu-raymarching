@@ -4,6 +4,7 @@
 extern crate image;
 extern crate num_traits;
 extern crate nalgebra as na;
+extern crate rayon;
 
 
 use std::f32;
@@ -15,7 +16,7 @@ use na::{Vector3, Point3, Unit};
 use num_traits::identities::Zero;
 
 
-const MAX_STEPS: usize = 64;
+const MAX_STEPS: usize = 512;
 const COLLISION_DISTANCE: f32 = 0.01;
 
 
@@ -83,11 +84,73 @@ impl Sdf for Plane {
 
 struct Scene {
     camera: Camera,
-    sdf: Fn(&Vector3<f32>) -> f32,
+    sdf: fn(&Vector3<f32>) -> f32,
 }
 
 impl Scene {
     fn render(&self) {
+        let back_color: image::Rgb<u8> = image::Rgb([200, 200, 200]);
+
+        let mut imgbuf = image::ImageBuffer::new(self.camera.res.0 as u32, self.camera.res.1 as u32);
+
+        let clock = std::time::Instant::now();
+
+        for y in 0..self.camera.res.1 {
+
+            for x in 0..self.camera.res.0 {
+                let r = self.camera.get_ray(x, y);
+                let y = self.camera.res.1 - y -1;  // flip vertficaly
+
+                let dist = self.march(&r);
+                let pos = r.org + *r.dir * dist;
+
+                if dist == std::f32::INFINITY {
+                    *imgbuf.get_pixel_mut(x as u32, y as u32) = back_color;
+                }
+                else {
+                    if dist < 0. {
+                        *imgbuf.get_pixel_mut(x as u32, y as u32) = image::Rgb([0, 0, 0]);
+                    }
+                    else {
+                        let color = [
+                            (pos.x.fract() * 256f32) as u8,
+                            (pos.y.fract() * 256f32) as u8,
+                            (pos.z.fract() * 256f32) as u8,
+
+                        ];
+
+                        *imgbuf.get_pixel_mut(x as u32, y as u32) = image::Rgb(color);
+                    }
+                }
+
+                if x < 10 && y < 10 {
+                    *imgbuf.get_pixel_mut(x as u32, y as u32) = image::Rgb([250, 250, 250]);
+                }
+
+            }
+        }
+        let elapsed = clock.elapsed().subsec_millis();
+        println!("render time: {:?}", elapsed);
+
+        image::ImageRgb8(imgbuf).save("out.png").unwrap();
+    }
+
+    fn march(&self, r: &Ray) -> f32 {
+        let mut current_pos = r.org;
+        let mut current_d = 0f32;
+
+        for i in 0..MAX_STEPS {
+            let d = (self.sdf)(&current_pos);
+
+            if d < COLLISION_DISTANCE {
+                return current_d;
+            }
+
+            current_d += d;
+            current_pos += *r.dir * d;
+        }
+
+        std::f32::INFINITY
     }
 }
 
@@ -99,23 +162,6 @@ fn dist(v: &Vector3<f32>) -> f32 {
     plane.sdf(v).min(sphere.sdf(v))
 }
 
-fn march(r: &Ray) -> f32 {
-    let mut current_pos = r.org;
-    let mut current_d = 0f32;
-
-    for i in 0..MAX_STEPS {
-        let d = dist(&current_pos);
-
-        if d < COLLISION_DISTANCE {
-            return current_d;
-        }
-
-        current_d += d;
-        current_pos += *r.dir * d;
-    }
-
-    std::f32::INFINITY
-}
 
 
 
@@ -130,48 +176,11 @@ fn main() {
         res: (500, 500),
     };
 
-    let back_color: image::Rgb<u8> = image::Rgb([200, 200, 200]);
+    let scene = Scene {
+        camera: c,
+        sdf: dist,
+    };
 
-    let mut imgbuf = image::ImageBuffer::new(c.res.0 as u32, c.res.1 as u32);
+    scene.render();
 
-    let clock = std::time::Instant::now();
-
-    for y in 0..c.res.1 {
-
-        for x in 0..c.res.0 {
-            let r = c.get_ray(x, y);
-            let y = c.res.1 - y -1;  // flip vertficaly
-
-            let dist = march(&r);
-            let pos = r.org + *r.dir * dist;
-
-            if dist == std::f32::INFINITY {
-                *imgbuf.get_pixel_mut(x as u32, y as u32) = back_color;
-            }
-            else {
-                if dist < 0. {
-                    *imgbuf.get_pixel_mut(x as u32, y as u32) = image::Rgb([0, 0, 0]);
-                }
-                else {
-                    let color = [
-                        (pos.x.fract() * 256f32) as u8,
-                        (pos.y.fract() * 256f32) as u8,
-                        (pos.z.fract() * 256f32) as u8,
-                        
-                    ];
-
-                    *imgbuf.get_pixel_mut(x as u32, y as u32) = image::Rgb(color);
-                }
-            }
-
-            if x < 10 && y < 10 {
-                *imgbuf.get_pixel_mut(x as u32, y as u32) = image::Rgb([250, 250, 250]);
-            }
-            
-        }
-    }
-    let elapsed = clock.elapsed().subsec_millis();
-    println!("render time: {:?}", elapsed);
-
-    image::ImageRgb8(imgbuf).save("out.png").unwrap();
 }
