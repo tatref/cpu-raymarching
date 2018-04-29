@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![feature(euclidean_division)]
 #![allow(unused_variables)]
 
 extern crate image;
@@ -11,13 +12,17 @@ use std::f32;
 use std::path::Path;
 use std::fs::File;
 
-use num_traits::Pow;
-use na::{Vector3, Point3, Unit};
+use image::ConvertBuffer;
+use na::{Vector3, Vector2, Point3, Unit};
+use na::{U1, U2, U3};
 use num_traits::identities::Zero;
+use num_traits::Pow;
+use rayon::prelude::*;
 
 
-const MAX_STEPS: usize = 512;
-const COLLISION_DISTANCE: f32 = 0.01;
+
+const MAX_STEPS: usize = 64;
+const PRECISION: f32 = 0.001;
 
 
 
@@ -66,7 +71,8 @@ struct Sphere {
 
 impl Sdf for Sphere {
     fn sdf(&self, v: &Vector3<f32>) -> f32 {
-        (v - self.center).norm() - self.radius
+        //(v - self.center).norm() - self.radius
+        v.norm() - self.radius
     }
 }
 
@@ -81,6 +87,18 @@ impl Sdf for Plane {
     }
 }
 
+struct Torus {
+    r1: f32,
+    r2: f32,
+}
+
+impl Sdf for Torus {
+    fn sdf(&self, v: &Vector3<f32>) -> f32 {
+        let q: Vector2<f32> = Vector2::new(Vector2::new(v[0], v[2]).norm() - self.r1, v[1]);
+        q.norm() - self.r2
+    }
+}
+
 
 struct Scene {
     camera: Camera,
@@ -88,8 +106,8 @@ struct Scene {
 }
 
 impl Scene {
-    fn render(&self) {
-        let back_color: image::Rgb<u8> = image::Rgb([200, 200, 200]);
+    fn render(&self) -> image::ImageBuffer<image::Rgb<f32>, Vec<f32>> {
+        let back_color: image::Rgb<f32> = image::Rgb([0., 0., 0.]);
 
         let mut imgbuf = image::ImageBuffer::new(self.camera.res.0 as u32, self.camera.res.1 as u32);
 
@@ -109,13 +127,13 @@ impl Scene {
                 }
                 else {
                     if dist < 0. {
-                        *imgbuf.get_pixel_mut(x as u32, y as u32) = image::Rgb([0, 0, 0]);
+                        *imgbuf.get_pixel_mut(x as u32, y as u32) = image::Rgb([255., 0., 0.]);
                     }
                     else {
                         let color = [
-                            (pos.x.fract() * 256f32) as u8,
-                            (pos.y.fract() * 256f32) as u8,
-                            (pos.z.fract() * 256f32) as u8,
+                            pos.x.fract() * 256f32,
+                            pos.y.fract() * 256f32,
+                            pos.z.fract() * 256f32,
 
                         ];
 
@@ -124,15 +142,15 @@ impl Scene {
                 }
 
                 if x < 10 && y < 10 {
-                    *imgbuf.get_pixel_mut(x as u32, y as u32) = image::Rgb([250, 250, 250]);
+                    *imgbuf.get_pixel_mut(x as u32, y as u32) = image::Rgb([250., 250., 250.]);
                 }
 
             }
         }
-        let elapsed = clock.elapsed().subsec_millis();
+        let elapsed = clock.elapsed();
         println!("render time: {:?}", elapsed);
 
-        image::ImageRgb8(imgbuf).save("out.png").unwrap();
+        imgbuf
     }
 
     fn march(&self, r: &Ray) -> f32 {
@@ -142,7 +160,7 @@ impl Scene {
         for i in 0..MAX_STEPS {
             let d = (self.sdf)(&current_pos);
 
-            if d < COLLISION_DISTANCE {
+            if d < PRECISION {
                 return current_d;
             }
 
@@ -155,13 +173,47 @@ impl Scene {
 }
 
 fn dist(v: &Vector3<f32>) -> f32 {
-    let sphere = Sphere { center: Vector3::new(10., 0., 0.), radius: 5f32 };
-
+    let sphere = Sphere { center: Vector3::new(10., 20., 0.), radius: 10f32 };
     let plane = Plane { normal: Unit::new_normalize(Vector3::new(0., 1., 0.)), dist: 0. };
+    let torus = Torus { r1: 4f32, r2: 1f32 };
 
-    plane.sdf(v).min(sphere.sdf(v))
+    //plane.sdf(v).min(sphere.sdf(v))
+    //sphere.sdf(&v)
+
+
+    let q = v.map(|a| a.mod_euc(10.)) - 0.5f32 * Vector3::new(10., 10., 10.);
+    torus.sdf(&q).max(sphere.sdf(&v))
 }
 
+
+fn tone_map(img: &image::ImageBuffer<image::Rgb<f32>, Vec<f32>> ) -> image::ImageBuffer<image::Rgb<u8>, Vec<u8>> {
+    let clock = std::time::Instant::now();
+
+    let n = img.width() * img.height();
+    
+    let mean: f32 = img.pixels().map(|p| p[0].max(p[1]).max(p[2])).sum::<f32>() / n as f32;
+    let sqr_mean: f32 = img.pixels().map(|p| p[0].max(p[1]).max(p[2]) * p[0].max(p[1]).max(p[2])).sum::<f32>() / n as f32;
+
+    let variance = sqr_mean - mean * mean;
+    let max_exposure = mean + variance.sqrt();
+
+
+    let mut result: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> = image::ImageBuffer::new(img.width(), img.width());
+
+    for (p_out, p_in) in result.pixels_mut().zip(img.pixels()) {
+        for i in 0..3 {
+            let ref mut sub_out = p_out[i];
+            let sub_in = p_in[i];
+            *sub_out = (sub_in.max(256f32)) as u8;
+            //*sub_out = (((sub_in as f32 / max_exposure) * 256f32).max(256f32)) as u8;
+        }
+    }
+
+    let elapsed = clock.elapsed();
+    println!("tone mapping time: {:?}", elapsed);
+
+    result
+}
 
 
 
@@ -181,6 +233,8 @@ fn main() {
         sdf: dist,
     };
 
-    scene.render();
+    let raw_image = scene.render();
+    let imgbuf = tone_map(&raw_image);
+    image::ImageRgb8(imgbuf).save("out.png").unwrap();
 
 }
