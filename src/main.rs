@@ -21,7 +21,7 @@ use rayon::prelude::*;
 
 
 
-const MAX_STEPS: usize = 64;
+const MAX_STEPS: usize = 256;
 const PRECISION: f32 = 0.001;
 
 
@@ -181,8 +181,8 @@ fn dist(v: &Vector3<f32>) -> f32 {
     //sphere.sdf(&v)
 
 
-    let q = v.map(|a| a.mod_euc(10.)) - 0.5f32 * Vector3::new(10., 10., 10.);
-    torus.sdf(&q).max(sphere.sdf(&v))
+    let q = Vector3::new(v.x.mod_euc(10.), v.y, v.z.mod_euc(10.)) - 0.5f32 * Vector3::new(10.0, 0.0, 10.);
+    torus.sdf(&q)
 }
 
 
