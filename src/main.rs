@@ -181,7 +181,7 @@ fn dist(v: &Vector3<f32>) -> f32 {
     //sphere.sdf(&v)
 
 
-    let q = Vector3::new(v.x.mod_euc(10.), v.y, v.z.mod_euc(10.)) - 0.5f32 * Vector3::new(10.0, 0.0, 10.);
+    let q = Vector3::new(v.x.rem_euclid(10.), v.y, v.z.rem_euclid(10.)) - 0.5f32 * Vector3::new(10.0, 0.0, 10.);
     torus.sdf(&q)
 }
 
