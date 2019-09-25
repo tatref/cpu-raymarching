@@ -1,5 +1,4 @@
 #![allow(unused_imports)]
-#![feature(euclidean_division)]
 #![allow(unused_variables)]
 
 extern crate image;
@@ -21,8 +20,8 @@ use rayon::prelude::*;
 
 
 
-const MAX_STEPS: usize = 256;
-const PRECISION: f32 = 0.001;
+const MAX_STEPS: usize = 512;
+const PRECISION: f32 = 0.0001;
 
 
 
@@ -204,7 +203,8 @@ fn tone_map(img: &image::ImageBuffer<image::Rgb<f32>, Vec<f32>> ) -> image::Imag
         for i in 0..3 {
             let ref mut sub_out = p_out[i];
             let sub_in = p_in[i];
-            *sub_out = (sub_in.max(256f32)) as u8;
+
+            *sub_out = (sub_in.min(256f32)) as u8;
             //*sub_out = (((sub_in as f32 / max_exposure) * 256f32).max(256f32)) as u8;
         }
     }
@@ -218,7 +218,7 @@ fn tone_map(img: &image::ImageBuffer<image::Rgb<f32>, Vec<f32>> ) -> image::Imag
 
 
 fn main() {
-    println!("Hello, world!");
+    println!("Ray-marching...");
 
     let c = Camera {
         org: Vector3::new(-10., 10., 0.),
